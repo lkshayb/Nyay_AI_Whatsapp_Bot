@@ -11,6 +11,7 @@ app.use(express.json());
 
 //webhook connection endpoint
 app.get('/webhook',(req:Request,res:Response) => {
+    console.log("REACHED AUTH WEBHOOK ENDPOINT")
     console.log(
         req.query["hub.mode"],
         req.query["hub.verify_token"],
@@ -26,17 +27,19 @@ app.get('/test',(req,res) => res.send("SERVER IS RUNNING, PLEASE ACCESS THROUGH 
 
 //main webhook post endpoint
 app.post('/webhook',async (req:Request,res:Response) => {
+    console.log("***REACHED WEBHOOK ENDPOINT FOR MESSAGING***")
     try{
         const entry = req.body?.entry?.[0];
         const changes = entry?.changes?.[0];
         const value = changes?.value;
         const messages:string = value?.messages;
+        console.log(messages)
         if (Array.isArray(messages) && messages.length > 0) {
             const msg = messages[0];
             const from = msg.from;                      
             const text = msg.text?.body || "";           
             appendMessage(entry.id, { role: "user", text: messages[0].text.body, time: Date.now() });
-            const history = getHistory(entry.id);
+            const history = getHistory(entry.id) || [];
             const replyText = await getResponse(text,history);
             appendMessage(entry.id, { role: "model", text: replyText, time: Date.now() });
             
@@ -75,15 +78,7 @@ async function sendWhatsappText(to: string, body: string) {
 }
 
 async function getResponse(text:string,history:Array<Object>):Promise<string | undefined>{
-    const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-            
-            {
-                role:"model",
-                parts : [
-                    {
-                        text: `
+    const SYSTEM_PROMPT = `
                             You are Nyay AI, an AI-powered legal awareness assistant trained on Indian laws.
 
                             Guidelines:
@@ -107,17 +102,30 @@ async function getResponse(text:string,history:Array<Object>):Promise<string | u
                                 - Always keep responses in the context of Indian law only.
                                 - Never provide non-Indian legal advice.
                             Use WhatsApp formatting conventions: *bold*, _italic_, ~strikethrough~, monospace
-                        `,
-                    }
-                ]
+
+                            RETURN YOUR RESPONSE IN A JSON FORMAT, IN THE FOLLOWING FORMAT:
+                                {
+                                    "response": RESPONSE TO THE USERS TEXT,
+                                    "intent": OFFENCE USER FACED
+                                }
+                        `
+    const safeHistory = Array.isArray(history) ? history : [];
+    const contents = [
+            {
+                role:"model",
+                parts : [{text: SYSTEM_PROMPT}]
             },
             {
                 role:"user",
-                parts : [{text : history + text}]
+                parts : [{text: history + text}]
             },
-        ],
+        ];
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents
     });
-    return response.text
+
+    return response.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn’t process that.";
 }
 
 const PORT = process.env.PORT || 3000;
