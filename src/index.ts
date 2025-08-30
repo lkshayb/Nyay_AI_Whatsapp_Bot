@@ -139,64 +139,57 @@ async function getResponse(text:string,history:Array<Object>):Promise<string | u
     });
 
     const rsp = response.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if(rsp == "Non Law Query"){
-        const contents = [
-            {
-                role:"model",
-                parts : [{text:  SYSTEM_PROMPT + history}]
-            },
-            {
-                role:"user",
-                parts : [{text: history + text}]
-            },
-        ];
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents
-        });
-        return response.candidates?.[0]?.content?.parts?.[0]?.text
-    }
-    else{
-        let rsp_tailored = ""
-        for(let i=0;i<rsp.length;i++){
-            if(rsp[i] == " "){
-                rsp_tailored = rsp_tailored + "+"
-            }
-            else{
-                rsp_tailored = rsp_tailored + rsp[i]
-            }
+    if(rsp){
+        if(rsp == "Non Law Query"){
+            const contents = [
+                {
+                    role:"model",
+                    parts : [{text:  SYSTEM_PROMPT + history}]
+                },
+                {
+                    role:"user",
+                    parts : [{text: history + text}]
+                },
+            ];
+            const response = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents
+            });
+            return response.candidates?.[0]?.content?.parts?.[0]?.text
         }
-        const fetch_query = await axios.post(
-            `https://api.indiankanoon.org/search/?formInput=${rsp_tailored}`,
-            {},
-            {
-                headers: {
-                    Authorization: `Token ${process.env.INDIAN_KANOON_API_KEY}`,
-                    "Content-Type": "application/json"
-                }
+        else{
+            let rsp_tailored = ""
+            for(let i=0;i<rsp.length;i++){
+                if(rsp[i] == " ") rsp_tailored = rsp_tailored + "+"
+                else rsp_tailored = rsp_tailored + rsp[i]
             }
-        )
-        console.log("Kanoon data is : ",JSON.stringify(fetch_query.data,null,2))
-        const contents = [
-            {
-                role:"model",
-                parts : [{text: SYSTEM_PROMPT + history}]
-            },
-            {
-                role:"user",
-                parts : [{text: JSON.stringify(fetch_query.data,null,2)}]
-            },
-        ];
-
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents
-        });
-        return response.candidates?.[0]?.content?.parts?.[0]?.text
+            const fetch_query = await axios.post(
+                `https://api.indiankanoon.org/search/?formInput=${rsp_tailored}`,
+                {},
+                {
+                    headers: {
+                        Authorization: `Token ${process.env.INDIAN_KANOON_API_KEY}`,
+                        "Content-Type": "application/json"
+                    }
+                }
+            )
+            const contents = [
+                {
+                    role:"model",
+                    parts : [{text: PROCESS_QUERY + history}]
+                },
+                {
+                    role:"user",
+                    parts : [{text: JSON.stringify(fetch_query.data,null,2)}]
+                },
+            ];
+            const response = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents
+            });
+            return response.candidates?.[0]?.content?.parts?.[0]?.text
+        }
     }
-
-
 }
 
 const PORT = process.env.PORT || 3000;
