@@ -41,6 +41,7 @@ app.post('/webhook',async (req:Request,res:Response) => {
             appendMessage(entry.id, { role: "user", text: messages[0].text.body, time: Date.now() });
             const history = getHistory(entry.id) || [];
             const replyText = await getResponse(text,history);
+            
             appendMessage(entry.id, { role: "model", text: replyText, time: Date.now() });
             
             if(replyText){
@@ -79,35 +80,53 @@ async function sendWhatsappText(to: string, body: string) {
 
 async function getResponse(text:string,history:Array<Object>):Promise<string | undefined>{
     const SYSTEM_PROMPT = `
-                            You are Nyay AI, an AI-powered legal awareness assistant trained on Indian laws.
+        You are Nyay AI, an AI-powered legal awareness assistant trained on Indian laws.
+        Guidelines:
+            1. Role & Scope
+                - Provide legal awareness based on Indian Kanoon and IPC/Acts.
+                - Do not act as a lawyer. Always clarify: “I am not a lawyer, this is only for legal awareness.”
+                - If unsure, ask the user for clarification instead of guessing.
 
-                            Guidelines:
+            2. Style & Tone
+                - Be empathetic in sensitive cases (e.g., domestic violence, harassment).
+                - Reply in a friendly, conversational manner.
+                - Always respond in the same language as the user (English, Hindi, Tamil, etc.).
 
-                                1. Role & Scope
-                                - Provide legal awareness based on Indian Kanoon and IPC/Acts.
-                                - Do not act as a lawyer. Always clarify: “I am not a lawyer, this is only for legal awareness.”
-                                - If unsure, ask the user for clarification instead of guessing.
+            3. Response Length
+                - Keep responses short and precise (100–150 words max, hard limit 250 words).
+                - Avoid unnecessary details or moral advice. Stick to law + awareness + next step.
 
-                                2. Style & Tone
-                                - Be empathetic in sensitive cases (e.g., domestic violence, harassment).
-                                - Reply in a friendly, conversational manner.
-                                - Always respond in the same language as the user (English, Hindi, Tamil, etc.).
+            4. Content Rules
+                - Cite relevant IPC sections, Acts, or case precedents briefly when useful.
+                - Always keep responses in the context of Indian law only.
+                - Never provide non-Indian legal advice.
+            Use WhatsApp formatting conventions: *bold*, _italic_, ~strikethrough~, monospace
 
-                                3. Response Length
-                                - Keep responses short and precise (100–150 words max, hard limit 250 words).
-                                - Avoid unnecessary details or moral advice. Stick to law + awareness + next step.
 
-                                4. Content Rules
-                                - Cite relevant IPC sections, Acts, or case precedents briefly when useful.
-                                - Always keep responses in the context of Indian law only.
-                                - Never provide non-Indian legal advice.
-                            Use WhatsApp formatting conventions: *bold*, _italic_, ~strikethrough~, monospace
-                        `
+    `
+
+    const KANNON_CONTEXT = `
+        You are Nyay AI, an AI-powered legal awareness assistant trained on Indian laws.
+        You have to write the search queary for indian kannon db, Analyse the users intent and if the user is refering to a crime or talking about a law,
+        then you have to return the search query for the Indian Kanon DB.
+        eg:
+            1.  User: Police took my Vehicle Without notice.
+                Model: Illegal seizure of vehicle.
+
+            2.  User: Hello.
+                Model: Non Law Query
+
+    `
+    
+    const PROCESS_QUERY = `
+        You are Nyay AI, and you have to process the Data of some laws I'm Providing you, take these and respond to the
+        user's query, Make it concise, and short.
+    `
     const safeHistory = Array.isArray(history) ? history : [];
     const contents = [
             {
                 role:"model",
-                parts : [{text: SYSTEM_PROMPT}]
+                parts : [{text: KANNON_CONTEXT}]
             },
             {
                 role:"user",
@@ -119,7 +138,65 @@ async function getResponse(text:string,history:Array<Object>):Promise<string | u
         contents
     });
 
-    return response.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn’t process that.";
+    const rsp = response.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if(rsp == "Non Law Query"){
+        const contents = [
+            {
+                role:"model",
+                parts : [{text:  SYSTEM_PROMPT + history}]
+            },
+            {
+                role:"user",
+                parts : [{text: history + text}]
+            },
+        ];
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents
+        });
+        return response.candidates?.[0]?.content?.parts?.[0]?.text
+    }
+    else{
+        let rsp_tailored = ""
+        for(let i=0;i<rsp.length;i++){
+            if(rsp[i] == " "){
+                rsp_tailored = rsp_tailored + "+"
+            }
+            else{
+                rsp_tailored = rsp_tailored + rsp[i]
+            }
+        }
+        const fetch_query = await axios.post(
+            `https://api.indiankanoon.org/search/?formInput=${rsp_tailored}`,
+            {},
+            {
+                headers: {
+                    Authorization: `Token ${process.env.INDIAN_KANOON_API_KEY}`,
+                    "Content-Type": "application/json"
+                }
+            }
+        )
+        console.log("Kanoon data is : ",JSON.stringify(fetch_query.data,null,2))
+        const contents = [
+            {
+                role:"model",
+                parts : [{text: SYSTEM_PROMPT + history}]
+            },
+            {
+                role:"user",
+                parts : [{text: JSON.stringify(fetch_query.data,null,2)}]
+            },
+        ];
+
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents
+        });
+        return response.candidates?.[0]?.content?.parts?.[0]?.text
+    }
+
+
 }
 
 const PORT = process.env.PORT || 3000;
