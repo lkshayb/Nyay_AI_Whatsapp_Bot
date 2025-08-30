@@ -28,11 +28,12 @@ app.get('/test',(req,res) => res.send("SERVER IS RUNNING, PLEASE ACCESS THROUGH 
 //main webhook post endpoint
 app.post('/webhook',async (req:Request,res:Response) => {
     console.log("***REACHED WEBHOOK ENDPOINT FOR MESSAGING***")
+    res.status(200);
     try{
         const entry = req.body?.entry?.[0];
         const changes = entry?.changes?.[0];
         const value = changes?.value;
-        const messages:string = value?.messages;
+        const messages= value?.messages as any[];
         console.log(messages)
         if (Array.isArray(messages) && messages.length > 0) {
             const msg = messages[0];
@@ -58,10 +59,10 @@ app.post('/webhook',async (req:Request,res:Response) => {
 
 //function to forward message to whatsapp
 async function sendWhatsappText(to: string, body: string) {
-    const url = `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`;
     console.log("Using token present?:", !!process.env.WHATSAPP_TOKEN);
+    console.log("crnt time : ",Date.now())
     const resp = await axios.post(
-        url,
+        `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`,
         {
             messaging_product: "whatsapp",
             to,
@@ -69,12 +70,10 @@ async function sendWhatsappText(to: string, body: string) {
             text: { body }
         },
         {
-            headers: {
-                Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-                "Content-Type": "application/json"
-            }
+            headers: {Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,"Content-Type": "application/json"}
         }
     );
+    console.log("after time : ",Date.now())
     console.log("status", resp.status, "data", resp.data);
 }
 
@@ -121,22 +120,30 @@ async function getResponse(text:string,history:Array<Object>):Promise<string | u
     const PROCESS_QUERY = `
         You are Nyay AI, and you have to process the Data of some laws I'm Providing you, take these and respond to the
         user's query, Make it concise, and short.
+
+        Guidelines:
+            1. Role & Scope
+                - Do not act as a lawyer. Always clarify: “I am not a lawyer, this is only for legal awareness.”
+                - If unsure, ask the user for clarification instead of guessing.
+
+            2. Style & Tone
+                - Be empathetic in sensitive cases (e.g., domestic violence, harassment).
+                - Reply in a friendly, conversational manner.
+                - Always respond in the same language as the user (English, Hindi, Tamil, etc.).
+
+            3. Response Length
+                - Keep responses short and precise (100–150 words max, hard limit 250 words).
+                - Avoid unnecessary details or moral advice. Stick to law + awareness + next step.
+
+            4. Content Rules
+                - Cite relevant IPC sections, Acts, or case precedents briefly when useful.
+                - Always keep responses in the context of Indian law only.
+                - Never provide non-Indian legal advice.
+            Use WhatsApp formatting conventions: *bold*, _italic_, ~strikethrough~, monospace
     `
-    const safeHistory = Array.isArray(history) ? history : [];
-    const contents = [
-            {
-                role:"model",
-                parts : [{text: KANNON_CONTEXT}]
-            },
-            {
-                role:"user",
-                parts : [{text: history + text}]
-            },
-        ];
-    const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents
-    });
+    const contents = [{role:"model",parts : [{text: KANNON_CONTEXT}]},{role:"user",parts : [{text: history + text}]},];
+
+    const response = await ai.models.generateContent({model: "gemini-2.5-flash",contents});
 
     const rsp = response.candidates?.[0]?.content?.parts?.[0]?.text;
     if(rsp){
