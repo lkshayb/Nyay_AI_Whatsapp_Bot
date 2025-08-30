@@ -102,12 +102,6 @@ async function getResponse(text:string,history:Array<Object>):Promise<string | u
                                 - Always keep responses in the context of Indian law only.
                                 - Never provide non-Indian legal advice.
                             Use WhatsApp formatting conventions: *bold*, _italic_, ~strikethrough~, monospace
-
-                            RETURN YOUR RESPONSE IN A JSON FORMAT, IN THE FOLLOWING FORMAT:
-                                {
-                                    "response": RESPONSE TO THE USERS TEXT,
-                                    "intent": OFFENCE USER FACED
-                                }
                         `
     const safeHistory = Array.isArray(history) ? history : [];
     const contents = [
